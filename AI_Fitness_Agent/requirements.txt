@@ -1,0 +1,5 @@
+markdownify
+smolagents
+requests
+ddgs
+pandas
