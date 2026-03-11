@@ -10,19 +10,19 @@ model = LiteLLMModel(
 
 
 @tool
-def convert_lb_to_kg(lb: float) -> float:
+def convert_lb_to_kg(weight_lb: float) -> float:
     """
     Convert weight from pounds to kilograms.
 
     Use this tool to convert lb or pounds to kg.
 
     Args:
-        lb: Weight in pounds.
+        weight_lb: Weight in pounds.
 
     Returns:
         Converted weight in kilograms.
     """
-    weight_in_kg = lb * 0.453592
+    weight_in_kg = weight_lb * 0.453592
     return weight_in_kg
 
 @tool
@@ -82,9 +82,9 @@ def energy_expenditure(bmr: float, activity_level: str) -> str:
         raise ValueError("Invalid activity level. Please choose from: Sedentary, Lightly Active, Moderately Active, Very Active, Super Active.")
 
     tdee = bmr * activity_multiplier
-    return f"Your Total Daily Energy Expenditure (TDEE) is {tdee:.2f} calories per day."
+    return tdee
 
-agent = ToolCallingAgent(
+agent = CodeAgent(
     tools=[convert_lb_to_kg, calculate_bmr, energy_expenditure],
     model=model,
     instructions="""
