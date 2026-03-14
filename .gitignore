@@ -1,0 +1,13 @@
+__pycache__
+*.pyc
+*.pyo
+virtualenv/
+venv/
+.env/
+
+# Chroma vector database
+agent_chroma_db/
+
+# Optional: other vector DBs
+*.sqlite3
+*.bin
