@@ -8,6 +8,7 @@ from llama_index.core.node_parser import SentenceSplitter
 from llama_index.core.ingestion import IngestionPipeline
 from llama_index.llms.huggingface_api import HuggingFaceInferenceAPI
 from llama_index.llms.ollama import Ollama
+from llama_index.core.evaluation import FaithfulnessEvaluator
 
 reader = SimpleDirectoryReader(input_dir="data")
 documents = reader.load_data()
@@ -42,5 +43,14 @@ query_engine = index.as_query_engine(
     llm=llm,
     response_mode="tree_summarize",
 )
-response = query_engine.query("What are troubleshooting steps for AWS EMR?")
-print(response)
+# response = query_engine.query("What are troubleshooting steps for AWS EMR?")
+# print(response)
+
+# evaluate the response
+evaluator = FaithfulnessEvaluator(llm=llm)
+response = query_engine.query(
+    "What are troubleshooting steps for AWS EMR?"
+)
+eval_result = evaluator.evaluate_response(response=response)
+eval_result.passing
+print(eval_result)
