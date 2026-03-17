@@ -16,7 +16,7 @@ search_tool = DuckDuckGoSearchRun()
 # Generate the chat interface, including the tools
 # llm = HuggingFaceEndpoint(
 #     repo_id="Qwen/Qwen2.5-Coder-32B-Instruct",
-#     HF_TOKEN = os.getenv("HF_TOKEN")
+#     huggingfacehub_api_token="",
 # )
 
 llm = ChatOllama(
