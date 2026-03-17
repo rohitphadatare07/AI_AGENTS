@@ -3,3 +3,5 @@ smolagents
 requests
 ddgs
 pandas
+litellm
+gradio
