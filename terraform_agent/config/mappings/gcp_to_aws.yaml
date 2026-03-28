@@ -1,0 +1,251 @@
+version: "1.0"
+source_provider: gcp
+target_provider: aws
+
+resource_mappings:
+  # Compute
+  google_compute_instance:
+    target: aws_instance
+    category: compute
+    attribute_mappings:
+      name: tags.Name
+      machine_type: instance_type
+      zone: availability_zone
+      tags: tags
+      metadata.ssh-keys: key_name
+    attribute_transformers:
+      machine_type:
+        type: lookup
+        mapping:
+          n1-standard-1: t3.small
+          n1-standard-2: t3.medium
+          n1-standard-4: t3.large
+          n1-standard-8: t3.xlarge
+          n2-standard-2: t3.medium
+          n2-standard-4: t3.large
+          e2-micro: t3.micro
+          e2-small: t3.small
+          e2-medium: t3.medium
+      zone:
+        type: zone_to_az
+    nested_blocks:
+      boot_disk:
+        target: root_block_device
+        mappings:
+          initialize_params.size: volume_size
+          initialize_params.type: volume_type
+          initialize_params.image: ami
+      network_interface:
+        target: network_interface
+        mappings:
+          network: subnet_id
+          access_config.nat_ip: associate_public_ip_address
+    requires_additional:
+      - aws_key_pair  # If SSH keys present
+      - aws_security_group  # From network tags
+    notes:
+      - "GCP metadata startup-script maps to user_data"
+      - "Service account maps to iam_instance_profile"
+
+  google_compute_network:
+    target: aws_vpc
+    category: network
+    attribute_mappings:
+      name: tags.Name
+      auto_create_subnetworks: null  # No direct equivalent
+    attribute_transformers:
+      auto_create_subnetworks:
+        type: custom
+        note: "If true, need to create subnets in each AZ"
+    computed_attributes:
+      cidr_block: "10.0.0.0/16"  # Must be specified for AWS
+      enable_dns_hostnames: true
+      enable_dns_support: true
+
+  google_compute_subnetwork:
+    target: aws_subnet
+    category: network
+    attribute_mappings:
+      name: tags.Name
+      ip_cidr_range: cidr_block
+      network: vpc_id
+      region: null  # Derived from AZ
+    attribute_transformers:
+      region:
+        type: region_to_azs
+        note: "Single GCP region becomes multiple AWS subnets in AZs"
+    computed_attributes:
+      map_public_ip_on_launch: false
+
+  google_compute_firewall:
+    target: aws_security_group
+    category: network
+    attribute_mappings:
+      name: name
+      network: vpc_id
+      description: description
+    complex_transformation: true
+    transformation_notes:
+      - "GCP firewall rules are VPC-level, AWS SGs are instance-level"
+      - "allow blocks become ingress/egress rules"
+      - "source_ranges becomes cidr_blocks"
+      - "target_tags must be mapped to SG associations"
+
+  # Storage
+  google_storage_bucket:
+    target: aws_s3_bucket
+    category: storage
+    attribute_mappings:
+      name: bucket
+      location: null  # S3 buckets don't have location in resource
+      storage_class: null  # Handled by lifecycle rules
+      force_destroy: force_destroy
+    requires_additional:
+      - aws_s3_bucket_versioning
+      - aws_s3_bucket_server_side_encryption_configuration
+      - aws_s3_bucket_public_access_block
+    attribute_transformers:
+      location:
+        type: region_mapping
+        mapping:
+          US: us-east-1
+          EU: eu-west-1
+          ASIA: ap-northeast-1
+      storage_class:
+        type: lookup
+        mapping:
+          STANDARD: STANDARD
+          NEARLINE: STANDARD_IA
+          COLDLINE: GLACIER
+          ARCHIVE: DEEP_ARCHIVE
+    nested_blocks:
+      versioning:
+        target_resource: aws_s3_bucket_versioning
+        mappings:
+          enabled: versioning_configuration.status
+      encryption:
+        target_resource: aws_s3_bucket_server_side_encryption_configuration
+      lifecycle_rule:
+        target_resource: aws_s3_bucket_lifecycle_configuration
+        note: "Complex mapping required"
+
+  # Database
+  google_sql_database_instance:
+    target: aws_db_instance
+    category: database
+    attribute_mappings:
+      name: identifier
+      database_version: engine_version
+      region: availability_zone
+    attribute_transformers:
+      database_version:
+        type: lookup
+        mapping:
+          POSTGRES_13: "13"
+          POSTGRES_14: "14"
+          POSTGRES_15: "15"
+          MYSQL_8_0: "8.0"
+          MYSQL_5_7: "5.7"
+    nested_blocks:
+      settings:
+        mappings:
+          tier: instance_class
+          disk_size: allocated_storage
+          disk_type: storage_type
+          backup_configuration.enabled: backup_retention_period
+    attribute_value_mappings:
+      tier_to_instance_class:
+        db-f1-micro: db.t3.micro
+        db-g1-small: db.t3.small
+        db-n1-standard-1: db.t3.small
+        db-n1-standard-2: db.t3.medium
+        db-n1-standard-4: db.t3.large
+
+  # IAM
+  google_service_account:
+    target: aws_iam_role
+    category: iam
+    attribute_mappings:
+      account_id: name
+      display_name: description
+    requires_additional:
+      - aws_iam_role_policy
+      - aws_iam_instance_profile  # If used with compute
+    notes:
+      - "GCP service accounts map to IAM roles with assume role policy"
+      - "Need to create trust policy for EC2/Lambda/etc"
+
+  google_project_iam_member:
+    target: aws_iam_role_policy_attachment
+    category: iam
+    complex_transformation: true
+    notes:
+      - "GCP IAM bindings need to be aggregated by role"
+      - "Map predefined roles to AWS managed policies"
+
+  # Container/Kubernetes
+  google_container_cluster:
+    target: aws_eks_cluster
+    category: container
+    attribute_mappings:
+      name: name
+      location: null  # Handled differently
+      description: tags.Description
+    requires_additional:
+      - aws_eks_node_group
+      - aws_iam_role  # For cluster and nodes
+      - aws_security_group
+    notes:
+      - "GKE autopilot has no direct EKS equivalent"
+      - "Node pools map to EKS node groups"
+
+  # Serverless
+  google_cloudfunctions_function:
+    target: aws_lambda_function
+    category: serverless
+    attribute_mappings:
+      name: function_name
+      description: description
+      runtime: runtime
+      entry_point: handler
+      timeout: timeout
+      available_memory_mb: memory_size
+      source_archive_bucket: null
+      source_archive_object: null
+    attribute_transformers:
+      runtime:
+        type: lookup
+        mapping:
+          python39: python3.9
+          python310: python3.10
+          python311: python3.11
+          nodejs16: nodejs16.x
+          nodejs18: nodejs18.x
+          go119: go1.x
+          java11: java11
+    requires_additional:
+      - aws_iam_role  # Execution role
+      - aws_lambda_permission  # For triggers
+
+# Variable transformations
+variable_transformations:
+  project:
+    action: remove
+    note: "AWS doesn't have project concept"
+  region:
+    action: keep
+    transform: region_mapping
+  zone:
+    action: transform
+    target: availability_zone
+
+# Common patterns
+patterns:
+  labels_to_tags:
+    description: "GCP labels become AWS tags"
+    source_attribute: labels
+    target_attribute: tags
+  
+  network_tags_to_security_groups:
+    description: "GCP network tags for firewall rules map to SG membership"
+    requires_manual_review: true
